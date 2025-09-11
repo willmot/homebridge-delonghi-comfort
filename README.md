@@ -1,5 +1,7 @@
 ## Homebridge De'Longhi Comfort (PAC) Plugin
 
+[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins) [![license-apache-2](https://badgen.net/static/license/apache%202/blue)](https://github.com/willmot/homebridge-delonghi-comfort/blob/main/LICENSE) 
+
 Provides HomeKit control for De'Longhi Comfort-connected PAC air conditioners via Homebridge.
 
 ### Install
