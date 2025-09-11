@@ -1,17 +1,25 @@
 {
+  "displayName": "Homebridge De'Longhi Comfort",
   "name": "homebridge-delonghi-comfort",
   "version": "1.0.3",
-  "description": "Homebridge plugin for De'Longhi Comfort-connected PAC air conditioners.",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "A Homebridge plugin for De'Longhi Comfort-connected PAC air conditioners.",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "author": "Tom Willmot <tom@willmot.co.uk>",
   "homepage": "https://github.com/willmot/homebridge-delonghi-comfort",
-  "bugs": {
-    "url": "https://github.com/willmot/homebridge-delonghi-comfort/issues"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/willmot/homebridge-delonghi-comfort.git"
   },
+  "bugs": {
+    "url": "https://github.com/willmot/homebridge-delonghi-comfort/issues"
+  },
+  "engines": {
+    "node": "^18.20.4 || ^20.18.0 || ^22.10.0",
+    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.json",
     "watch": "tsc -w -p tsconfig.json",
@@ -23,19 +31,6 @@
     "homebridge-plugin",
     "delonghi"
   ],
-  "author": "Tom Willmot <tom@willmot.co.uk>",
-  "license": "Apache-2.0",
-  "files": [
-    "dist",
-    "config.schema.json",
-    "README.md",
-    "LICENSE"
-  ],
-  "type": "commonjs",
-  "engines": {
-    "node": ">=18.0.0",
-    "homebridge": ">=1.6.0"
-  },
   "homebridge": {
     "pluginAlias": "DelonghiComfortPlatform",
     "platform": "DelonghiComfortPlatform"
@@ -44,9 +39,6 @@
     "axios": "^1.11.0",
     "axios-cookiejar-support": "^6.0.4",
     "tough-cookie": "^5.1.2"
-  },
-  "peerDependencies": {
-    "homebridge": ">=1.6.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.1",
