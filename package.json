@@ -8,6 +8,10 @@
   "bugs": {
     "url": "https://github.com/willmot/homebridge-delonghi-comfort/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/willmot/homebridge-delonghi-comfort.git"
+  },
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.json",
     "watch": "tsc -w -p tsconfig.json",
@@ -19,7 +23,7 @@
     "homebridge-plugin",
     "delonghi"
   ],
-  "author": "",
+  "author": "Tom Willmot <tom@willmot.co.uk>",
   "license": "Apache-2.0",
   "files": [
     "dist",
