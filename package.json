@@ -1,7 +1,7 @@
 {
   "displayName": "Homebridge De'Longhi Comfort",
   "name": "homebridge-delonghi-comfort",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "A Homebridge plugin for De'Longhi Comfort-connected PAC air conditioners.",
   "license": "Apache-2.0",
   "type": "commonjs",
