@@ -1,9 +1,13 @@
 {
   "name": "homebridge-delonghi-comfort",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Homebridge plugin for De'Longhi Comfort-connected PAC air conditioners.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "homepage": "https://github.com/willmot/homebridge-delonghi-comfort",
+  "bugs": {
+    "url": "https://github.com/willmot/homebridge-delonghi-comfort/issues"
+  },
   "scripts": {
     "build": "rimraf dist && tsc -p tsconfig.json",
     "watch": "tsc -w -p tsconfig.json",
@@ -13,10 +17,7 @@
   },
   "keywords": [
     "homebridge-plugin",
-    "homekit",
-    "delonghi",
-    "air-conditioner",
-    "comfort"
+    "delonghi"
   ],
   "author": "",
   "license": "Apache-2.0",
@@ -48,7 +49,6 @@
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
     "eslint": "^9.34.0",
-    "homebridge": "^1.6.1",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
