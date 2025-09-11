@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "pluginAlias": "DelonghiComfortPlatform",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "default": "De'Longhi Comfort" },
+      "username": { "type": "string" },
+      "password": { "type": "string" },
+      "language": { "type": "string", "default": "en" },
+      "scanInterval": { "type": "number", "default": 60, "minimum": 30, "maximum": 300 }
+    },
+    "required": ["username", "password"]
+  }
+}

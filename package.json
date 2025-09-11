@@ -1,0 +1,57 @@
+{
+  "name": "homebridge-delonghi-comfort",
+  "version": "0.1.0",
+  "description": "Homebridge plugin for De'Longhi Comfort-connected PAC air conditioners.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "prepare": "npm run build",
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "keywords": [
+    "homebridge-plugin",
+    "homekit",
+    "delonghi",
+    "air-conditioner",
+    "comfort"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0",
+    "homebridge": ">=1.6.0"
+  },
+  "homebridge": {
+    "pluginAlias": "DelonghiComfortPlatform",
+    "platform": "DelonghiComfortPlatform"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "axios-cookiejar-support": "^6.0.4",
+    "tough-cookie": "^5.1.2"
+  },
+  "peerDependencies": {
+    "homebridge": ">=1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.42.0",
+    "@typescript-eslint/parser": "^8.42.0",
+    "eslint": "^9.34.0",
+    "homebridge": "^1.6.1",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.2"
+  }
+}
