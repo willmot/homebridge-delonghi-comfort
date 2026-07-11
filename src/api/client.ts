@@ -257,8 +257,8 @@ export class DelonghiClient {
       // fallback to known property name from HA integration
       setName = 'set_silent_function';
     }
-    // API expects 1=ON, 2=OFF
-    await this.postProperty(deviceId, setName, enabled ? 1 : 2);
+    // Ayla boolean properties use 1=ON, 0=OFF.
+    await this.postProperty(deviceId, setName, enabled ? 1 : 0);
   }
 
   private async performAuthFlow(): Promise<string> {
