@@ -24,7 +24,10 @@ export class DelonghiComfortPlatform implements DynamicPlatformPlugin {
         const username = String(config.username || '');
         const password = String(config.password || '');
         const language = String(config.language || 'en-GB');
-        const scanInterval = Number(config.scanInterval || 60);
+        const requestedScanInterval = Number(config.scanInterval || 60);
+        const scanInterval = Number.isFinite(requestedScanInterval)
+          ? Math.max(30, requestedScanInterval)
+          : 60;
 
         if (!username || !password) {
           this.log.error('Missing username/password in config');
@@ -42,7 +45,13 @@ export class DelonghiComfortPlatform implements DynamicPlatformPlugin {
         }
 
         // Start polling
+        let pollInProgress = false;
         setInterval(async () => {
+          if (pollInProgress) {
+            this.log.warn('Skipping poll because the previous De\'Longhi cloud request is still running');
+            return;
+          }
+          pollInProgress = true;
           try {
             const latest = await this.client.listDevices();
             const seen = new Set<string>();
@@ -61,9 +70,11 @@ export class DelonghiComfortPlatform implements DynamicPlatformPlugin {
               }
             }
           } catch (err: any) {
-            this.log.error('Polling error: ' + err?.message || String(err));
+            this.log.error('Polling error: ' + (err?.message || String(err)));
+          } finally {
+            pollInProgress = false;
           }
-        }, Math.max(30, scanInterval) * 1000);
+        }, scanInterval * 1000);
       } catch (err: any) {
         this.log.error('Failed to initialize platform: ' + (err?.message || String(err)));
       }

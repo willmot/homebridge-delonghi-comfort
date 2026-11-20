@@ -1,4 +1,4 @@
-import { PlatformAccessory, Service } from 'homebridge';
+import { Perms, PlatformAccessory, Service } from 'homebridge';
 import { DelonghiComfortPlatform } from '../platform/platform';
 import { DelonghiClient, DelonghiDeviceSummary } from '../api/client';
 
@@ -13,6 +13,17 @@ export class DelonghiComfortAccessory {
   private optimisticMode?: { value: 'cool' | 'eco'; until: number };
   private thresholdWriteLockUntil?: number;
   private thresholdLockMode?: 'cool' | 'eco';
+  private humidityService?: Service;
+  private silentModeService?: Service;
+  private swingModeService?: Service;
+
+  private get minimumTargetTemperature(): number {
+    return this.current.minimumTargetTemperature ?? 18;
+  }
+
+  private clampTargetTemperature(value: unknown): number {
+    return Math.max(this.minimumTargetTemperature, Math.min(32, Math.round(Number(value))));
+  }
 
   constructor(
     private readonly platform: DelonghiComfortPlatform,
@@ -26,14 +37,15 @@ export class DelonghiComfortAccessory {
 
     accessory.getService(platform.Service.AccessoryInformation)!
       .setCharacteristic(Characteristic.Manufacturer, 'DeLonghi')
-      .setCharacteristic(Characteristic.Model, 'Comfort V2')
+      .setCharacteristic(Characteristic.Model, device.model || 'Comfort V2')
+      .setCharacteristic(Characteristic.FirmwareRevision, device.firmwareVersion || 'unknown')
       .setCharacteristic(Characteristic.SerialNumber, device.id);
 
     this.service = accessory.getService(Service.HeaterCooler) || accessory.addService(Service.HeaterCooler);
     this.service.setCharacteristic(Characteristic.Name, device.name);
     // Seed last remembered cool target
     try {
-      const seed = Math.max(18, Math.min(32, Math.round(Number(device.targetTemperature ?? 24))));
+      const seed = this.clampTargetTemperature(device.targetTemperature ?? 24);
       this.lastCoolTargetC = seed;
     } catch {}
 
@@ -82,7 +94,7 @@ export class DelonghiComfortAccessory {
       })
       .onSet(async (value) => {
         const prevMode = (this.current?.mode || 'cool') as 'cool' | 'eco' | 'dry' | 'fan';
-        const prevCool = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24))));
+        const prevCool = this.clampTargetTemperature(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24);
         try {
           if (value === Characteristic.TargetHeaterCoolerState.COOL) {
             // Immediately make thresholds editable and show latest cool setpoint
@@ -90,13 +102,13 @@ export class DelonghiComfortAccessory {
               this.optimisticMode = { value: 'cool', until: Date.now() + 5000 };
               this.thresholdWriteLockUntil = Date.now() + 1500;
               this.thresholdLockMode = 'cool';
-              const RW = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.WRITE, this.platform.Characteristic.Perms.NOTIFY] as any;
+              const RW = [Perms.PAIRED_READ, Perms.PAIRED_WRITE, Perms.EVENTS] as any;
               this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
-                .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+                .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
               this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature)
-                .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
-              const cool = Math.max(18, Math.min(32, Math.round(Number(this.lastCoolTargetC ?? this.current?.targetTemperature ?? prevCool))));
-              const heat = Math.min(Math.max(18, Math.round(this.heatThresholdC)), cool - 1);
+                .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
+              const cool = this.clampTargetTemperature(this.lastCoolTargetC ?? this.current?.targetTemperature ?? prevCool);
+              const heat = Math.min(Math.max(this.minimumTargetTemperature, Math.round(this.heatThresholdC)), cool - 1);
               this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, cool);
               this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, heat);
               // Remember and optimistically cache
@@ -118,13 +130,13 @@ export class DelonghiComfortAccessory {
               this.thresholdWriteLockUntil = Date.now() + 1500;
               this.thresholdLockMode = 'eco';
               // Remember current cool target before switching
-              const currentCool = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24))));
+              const currentCool = this.clampTargetTemperature(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24);
               this.lastCoolTargetC = currentCool;
               // First set values to the eco window
               this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, 24);
               this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, 20);
               // Then tighten props to strict RO 20–24
-              const RO = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.NOTIFY] as any;
+              const RO = [Perms.PAIRED_READ, Perms.EVENTS] as any;
               this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
                 .setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
               this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature)
@@ -137,8 +149,8 @@ export class DelonghiComfortAccessory {
           // Roll back UI/state to previous mode presentation
           try {
             const wasEco = prevMode === 'eco';
-            const RO = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.NOTIFY] as any;
-            const RW = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.WRITE, this.platform.Characteristic.Perms.NOTIFY] as any;
+            const RO = [Perms.PAIRED_READ, Perms.EVENTS] as any;
+            const RW = [Perms.PAIRED_READ, Perms.PAIRED_WRITE, Perms.EVENTS] as any;
             if (wasEco) {
               // Revert to AUTO window 20–24
               this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature).setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
@@ -148,10 +160,10 @@ export class DelonghiComfortAccessory {
               this.service.updateCharacteristic(Characteristic.TargetHeaterCoolerState, Characteristic.TargetHeaterCoolerState.AUTO);
             } else {
               // Revert to COOL window 18–32 and previous cool target
-              this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature).setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
-              this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature).setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+              this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature).setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
+              this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature).setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
               this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, prevCool);
-              const prevHeat = Math.max(18, Math.min(32, prevCool - 1));
+              const prevHeat = Math.max(this.minimumTargetTemperature, Math.min(32, prevCool - 1));
               this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, prevHeat);
               this.service.updateCharacteristic(Characteristic.TargetHeaterCoolerState, Characteristic.TargetHeaterCoolerState.COOL);
             }
@@ -172,6 +184,54 @@ export class DelonghiComfortAccessory {
         } catch { return 20; }
       });
 
+    if (typeof device.humidity === 'number') {
+      this.humidityService = accessory.getService(Service.HumiditySensor) ||
+        accessory.addService(Service.HumiditySensor, `${device.name} Humidity`, 'humidity');
+      this.humidityService.setCharacteristic(Characteristic.Name, `${device.name} Humidity`);
+      this.humidityService.getCharacteristic(Characteristic.CurrentRelativeHumidity)
+        .onGet(() => Math.max(0, Math.min(100, Number(this.current.humidity ?? 0))));
+    }
+
+    if (device.silentMode !== undefined) {
+      this.silentModeService = accessory.getServiceById(Service.Switch, 'silent-mode') ||
+        accessory.addService(Service.Switch, 'Silent Mode', 'silent-mode');
+      this.silentModeService.setCharacteristic(Characteristic.Name, 'Silent Mode');
+      this.silentModeService.getCharacteristic(Characteristic.On)
+        .onGet(() => !!this.current.silentMode)
+        .onSet(async value => {
+          const previous = !!this.current.silentMode;
+          const enabled = !!value;
+          this.current.silentMode = enabled;
+          try {
+            await this.client.setSilentMode(device.id, enabled);
+          } catch (error) {
+            this.current.silentMode = previous;
+            this.silentModeService?.updateCharacteristic(Characteristic.On, previous);
+            this.platform.log.warn('Failed to set silent mode:', (error as any)?.message || String(error));
+          }
+        });
+    }
+
+    if (device.swingMode !== undefined) {
+      this.swingModeService = accessory.getServiceById(Service.Switch, 'swing-mode') ||
+        accessory.addService(Service.Switch, 'Swing', 'swing-mode');
+      this.swingModeService.setCharacteristic(Characteristic.Name, 'Swing');
+      this.swingModeService.getCharacteristic(Characteristic.On)
+        .onGet(() => !!this.current.swingMode)
+        .onSet(async value => {
+          const previous = !!this.current.swingMode;
+          const enabled = !!value;
+          this.current.swingMode = enabled;
+          try {
+            await this.client.setSwingMode(device.id, enabled);
+          } catch (error) {
+            this.current.swingMode = previous;
+            this.swingModeService?.updateCharacteristic(Characteristic.On, previous);
+            this.platform.log.warn('Failed to set swing mode:', (error as any)?.message || String(error));
+          }
+        });
+    }
+
     // Cooling threshold (Cool: editable 18–32; Auto: read-only 24)
     const cooling = this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
       // Start permissive to swallow any cached HomeKit values, then tighten later
@@ -185,7 +245,7 @@ export class DelonghiComfortAccessory {
           }
           const v = Number(this.current?.targetTemperature);
           const t = Number.isFinite(v) ? v : 24;
-          return Math.max(18, Math.min(32, Math.round(t)));
+          return this.clampTargetTemperature(t);
         } catch { return 24; }
       })
       .onSet(async (value) => {
@@ -203,14 +263,14 @@ export class DelonghiComfortAccessory {
               try { this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, 24); } catch {}
               return;
             } else {
-              const prev = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24))));
+              const prev = this.clampTargetTemperature(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24);
               try { this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, prev); } catch {}
               return;
             }
           }
           const t = Number(value);
-          const clamped = Math.max(18, Math.min(32, Math.round(t)));
-          const prev = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24))));
+          const clamped = this.clampTargetTemperature(t);
+          const prev = this.clampTargetTemperature(this.current?.targetTemperature ?? this.lastCoolTargetC ?? 24);
           // Optimistically reflect the clamped value before sending
           try { this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, clamped); } catch {}
           // Update local cache and hold optimistic value to avoid flicker until poll reflects it
@@ -229,7 +289,7 @@ export class DelonghiComfortAccessory {
       });
     // Initialize with a safe value to avoid Home using an out-of-range cache
     try {
-      const init = Math.max(18, Math.min(32, Math.round(this.current.targetTemperature ?? 21)));
+      const init = this.clampTargetTemperature(this.current.targetTemperature ?? 21);
       cooling.updateValue(init);
     } catch {}
 
@@ -279,12 +339,12 @@ export class DelonghiComfortAccessory {
             // Fixed lower bound for Keep Between control in AUTO
             return 20;
           }
-          const cool = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? 24))));
-          const hStored = Math.max(18, Math.min(32, Math.round(this.heatThresholdC)));
+          const cool = this.clampTargetTemperature(this.current?.targetTemperature ?? 24);
+          const hStored = Math.max(this.minimumTargetTemperature, Math.min(32, Math.round(this.heatThresholdC)));
           // Derive a safe heating value not exceeding cool and not below 18
-          const derived = Math.max(18, Math.min(32, cool - 1));
-          return Math.max(18, Math.min(32, Math.min(hStored, derived)));
-        } catch { return 18; }
+          const derived = Math.max(this.minimumTargetTemperature, Math.min(32, cool - 1));
+          return Math.max(this.minimumTargetTemperature, Math.min(32, Math.min(hStored, derived)));
+        } catch { return this.minimumTargetTemperature; }
       })
       .onSet(async (_value) => {
         // Read-only semantics; reset to computed value
@@ -300,22 +360,22 @@ export class DelonghiComfortAccessory {
               this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, 20);
               return;
             } else {
-              const cool = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? 24))));
-              const prevHeat = Math.max(18, Math.min(32, cool - 1));
+              const cool = this.clampTargetTemperature(this.current?.targetTemperature ?? 24);
+              const prevHeat = Math.max(this.minimumTargetTemperature, Math.min(32, cool - 1));
               this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, prevHeat);
               return;
             }
           }
-          const cool = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? 24))));
-          const derived = Math.max(18, Math.min(32, cool - 1));
-          const safe = Math.max(18, derived);
+          const cool = this.clampTargetTemperature(this.current?.targetTemperature ?? 24);
+          const derived = Math.max(this.minimumTargetTemperature, Math.min(32, cool - 1));
+          const safe = Math.max(this.minimumTargetTemperature, derived);
           this.heatThresholdC = safe;
           this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, safe);
         } catch {}
       });
     try {
-      const coolInit = Math.max(18, Math.min(32, Math.round(Number(this.current?.targetTemperature ?? 24))));
-      const initHeat = Math.max(18, Math.min(32, coolInit - 1));
+      const coolInit = this.clampTargetTemperature(this.current?.targetTemperature ?? 24);
+      const initHeat = Math.max(this.minimumTargetTemperature, Math.min(32, coolInit - 1));
       heating.updateValue(initHeat);
     } catch {}
 
@@ -323,17 +383,17 @@ export class DelonghiComfortAccessory {
     try {
       const inEco = this.current?.mode === 'eco';
       if (inEco) {
-        const RO = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.NOTIFY] as any;
+        const RO = [Perms.PAIRED_READ, Perms.EVENTS] as any;
         this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
           .setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
         this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature)
           .setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
       } else {
-        const RW = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.WRITE, this.platform.Characteristic.Perms.NOTIFY] as any;
+        const RW = [Perms.PAIRED_READ, Perms.PAIRED_WRITE, Perms.EVENTS] as any;
         this.service.getCharacteristic(Characteristic.CoolingThresholdTemperature)
-          .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+          .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
         this.service.getCharacteristic(Characteristic.HeatingThresholdTemperature)
-          .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+          .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
       }
     } catch {}
 
@@ -368,15 +428,25 @@ export class DelonghiComfortAccessory {
     if (typeof device.roomTemperature === 'number') {
       this.service.updateCharacteristic(Characteristic.CurrentTemperature, device.roomTemperature);
     }
+    if (typeof device.humidity === 'number') {
+      this.humidityService?.updateCharacteristic(Characteristic.CurrentRelativeHumidity,
+        Math.max(0, Math.min(100, device.humidity)));
+    }
+    if (device.silentMode !== undefined) {
+      this.silentModeService?.updateCharacteristic(Characteristic.On, device.silentMode);
+    }
+    if (device.swingMode !== undefined) {
+      this.swingModeService?.updateCharacteristic(Characteristic.On, device.swingMode);
+    }
     // Compute desired thresholds for this tick
     let desiredCool = 24;
     let desiredHeat = 20;
     try {
       const raw = Number(device.targetTemperature);
-      const clamped = Number.isFinite(raw) ? Math.max(18, Math.min(32, Math.round(raw))) : 24;
+      const clamped = Number.isFinite(raw) ? this.clampTargetTemperature(raw) : 24;
       if (effectiveMode !== 'eco') {
         desiredCool = clamped;
-        desiredHeat = Math.max(18, Math.min(32, desiredCool - 1));
+        desiredHeat = Math.max(this.minimumTargetTemperature, Math.min(32, desiredCool - 1));
       }
     } catch {}
 
@@ -387,18 +457,18 @@ export class DelonghiComfortAccessory {
         try { this.service.updateCharacteristic(Characteristic.CoolingThresholdTemperature, 24); } catch {}
         try { this.service.updateCharacteristic(Characteristic.HeatingThresholdTemperature, 20); } catch {}
         // Then set props strict 20–24
-        const RO = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.NOTIFY] as any;
+        const RO = [Perms.PAIRED_READ, Perms.EVENTS] as any;
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
           .setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
         this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
           .setProps({ minValue: 20, maxValue: 24, minStep: 1, perms: RO });
       } else {
         // First relax props to 18–32
-        const RW = [this.platform.Characteristic.Perms.READ, this.platform.Characteristic.Perms.WRITE, this.platform.Characteristic.Perms.NOTIFY] as any;
+        const RW = [Perms.PAIRED_READ, Perms.PAIRED_WRITE, Perms.EVENTS] as any;
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
-          .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+          .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
         this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-          .setProps({ minValue: 18, maxValue: 32, minStep: 1, perms: RW });
+          .setProps({ minValue: this.minimumTargetTemperature, maxValue: 32, minStep: 1, perms: RW });
         // Then update values within this window
         const ok = !(this.optimisticCoolTarget && now < this.optimisticCoolTarget.until && this.optimisticCoolTarget.value !== desiredCool);
         if (ok) {

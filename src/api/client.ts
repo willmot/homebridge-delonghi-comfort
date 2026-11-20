@@ -26,6 +26,9 @@ export interface DelonghiClientOptions {
 export interface DelonghiDeviceSummary {
   id: string;
   name: string;
+  model?: string;
+  firmwareVersion?: string;
+  minimumTargetTemperature?: number;
   roomTemperature?: number;
   targetTemperature?: number;
   humidity?: number;
@@ -33,6 +36,7 @@ export interface DelonghiDeviceSummary {
   mode?: 'cool' | 'dry' | 'fan' | 'eco' | 'off';
   fanSpeed?: string;
   silentMode?: boolean;
+  swingMode?: boolean;
 }
 
 export class DelonghiClient {
@@ -42,6 +46,7 @@ export class DelonghiClient {
   private useMock: boolean;
   private devicesCache: DelonghiDeviceSummary[] = [];
   private refreshToken?: string;
+  private sessionRequest?: Promise<void>;
 
   constructor(private readonly options: DelonghiClientOptions) {
     this.log = options.logger;
@@ -78,7 +83,42 @@ export class DelonghiClient {
       this.authToken = 'mock-token';
       return;
     }
-    this.authToken = await this.performAuthFlow();
+    if (!this.sessionRequest) {
+      this.sessionRequest = this.renewAccessToken().then(token => {
+        this.authToken = token;
+      }).finally(() => {
+        this.sessionRequest = undefined;
+      });
+    }
+    await this.sessionRequest;
+  }
+
+  private async renewAccessToken(): Promise<string> {
+    if (this.refreshToken) {
+      try {
+        const { data } = await this.http.post(
+          'https://user-field-eu.aylanetworks.com/users/refresh_token.json',
+          { user: { refresh_token: this.refreshToken } },
+          { headers: { 'User-Agent': TOKEN_USER_AGENT }, maxRedirects: 0 },
+        );
+        const accessToken: unknown = data?.access_token;
+        if (typeof accessToken !== 'string' || !accessToken) {
+          throw new Error('Ayla refresh did not return an access token');
+        }
+        if (typeof data.refresh_token === 'string' && data.refresh_token) {
+          this.refreshToken = data.refresh_token;
+        }
+        return accessToken;
+      } catch (error) {
+        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+        if (status !== 400 && status !== 401 && status !== 403) {
+          throw error;
+        }
+        this.refreshToken = undefined;
+        this.log?.debug('Ayla rejected the refresh token. Signing in again.');
+      }
+    }
+    return this.performAuthFlow();
   }
 
   async listDevices(): Promise<DelonghiDeviceSummary[]> {
@@ -90,16 +130,7 @@ export class DelonghiClient {
       }));
       return this.devicesCache;
     }
-    // Real devices
-    if (!this.authToken) {
-      await this.login();
-    }
-    const headers = {
-      'User-Agent': API_USER_AGENT,
-      'Authorization': `auth_token ${this.authToken}`,
-      'Accept': 'application/json',
-    };
-    const { data } = await this.http.get('apiv1/devices.json', { headers });
+    const data = await this.getDeviceData('apiv1/devices.json');
     const devices = Array.isArray(data) ? data : [];
     // Fetch key properties per device
     const summaries: DelonghiDeviceSummary[] = [];
@@ -119,9 +150,13 @@ export class DelonghiClient {
       const silent = this.detectSilent(props);
       const roomTemp = getVal('room_temp');
       const targetTemp = getVal('temp_setpoint');
+      const model = getVal('appliance_model');
       summaries.push({
         id: dsn,
         name,
+        model: typeof model === 'string' ? model : undefined,
+        firmwareVersion: getVal('firmware_version')?.toString(),
+        minimumTargetTemperature: model === 'EL110' ? 19 : 18,
         roomTemperature: typeof roomTemp === 'number' ? roomTemp : undefined,
         targetTemperature: typeof targetTemp === 'number' ? targetTemp : undefined,
         humidity: getVal('room_hum'),
@@ -129,6 +164,7 @@ export class DelonghiClient {
         mode: mode === 1 ? 'cool' : mode === 2 ? 'dry' : mode === 3 ? 'fan' : mode === 5 ? 'eco' : 'off',
         fanSpeed: FAN_SPEED_TO_NAME[fan || 4] || 'auto',
         silentMode: silent?.enabled,
+        swingMode: this.toBoolean(getVal('get_swing_function')),
       });
     }
     this.devicesCache = summaries;
@@ -147,12 +183,13 @@ export class DelonghiClient {
 
   async setTargetTemperature(deviceId: string, temperatureC: number): Promise<void> {
     this.log?.debug(`setTargetTemperature ${deviceId} => ${temperatureC}`);
+    const minimum = this.getDevice(deviceId)?.minimumTargetTemperature ?? 18;
     if (this.useMock) {
-      const t = Math.round(Math.max(18, Math.min(32, temperatureC)));
+      const t = Math.round(Math.max(minimum, Math.min(32, temperatureC)));
       this.updateCache(deviceId, { targetTemperature: t });
       return;
     }
-    const t = Math.max(18, Math.min(32, Number(temperatureC)));
+    const t = Math.max(minimum, Math.min(32, Number(temperatureC)));
     await this.postProperty(deviceId, 'set_temp_setpoint', t);
   }
 
@@ -187,22 +224,67 @@ export class DelonghiClient {
   }
 
   private async getDeviceProperties(dsn: string): Promise<any[]> {
-    if (!this.authToken) {
-      await this.login();
-    }
-    const headers = {
-      'User-Agent': API_USER_AGENT,
-      'Authorization': `auth_token ${this.authToken}`,
-      'Accept': 'application/json',
-    };
-    const { data } = await this.http.get(`apiv1/dsns/${dsn}/properties.json`, { headers });
+    const data = await this.getDeviceData(`apiv1/dsns/${dsn}/properties.json`);
     return Array.isArray(data) ? data : [];
   }
 
-  private async postProperty(dsn: string, prop: string, value: any): Promise<void> {
-    if (!this.authToken) {
+  private async getDeviceData(url: string): Promise<unknown> {
+    if (!this.authToken || this.sessionRequest) {
       await this.login();
     }
+    const attempts = 2;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const token = this.authToken;
+      try {
+        const { data } = await this.http.get<unknown>(url, {
+          headers: { 'User-Agent': API_USER_AGENT, 'Authorization': `auth_token ${token}` },
+        });
+        return data;
+      } catch (error) {
+        if (attempt === attempts || !axios.isAxiosError(error)) {
+          throw error;
+        }
+        const status = error.response?.status;
+        if (status === 401) {
+          // A concurrent request may already have renewed the rejected token.
+          if (this.authToken === token || this.sessionRequest) {
+            await this.login();
+          }
+          continue;
+        }
+        const retryable = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' ||
+          status === 408 || status === 429 || (status !== undefined && status >= 500);
+        if (!retryable) {
+          throw error;
+        }
+        const delayMs = status === 429 ? 5000 : 1500;
+        this.log?.warn(`De'Longhi GET ${url} failed (${error.message}); retrying once in ${delayMs}ms`);
+        await this.delay(delayMs);
+      }
+    }
+    throw new Error(`De'Longhi GET ${url} failed`);
+  }
+
+  private async delay(milliseconds: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, milliseconds));
+  }
+
+  private async assertDeviceOnline(dsn: string): Promise<void> {
+    const data = await this.getDeviceData('apiv1/devices.json');
+    const item = Array.isArray(data)
+      ? data.find(candidate => candidate?.device?.dsn === dsn)
+      : undefined;
+    if (!item?.device) {
+      throw new Error(`De'Longhi device ${dsn} was not found`);
+    }
+    const status = String(item.device.connection_status || 'unknown');
+    if (status.toLowerCase() !== 'online') {
+      throw new Error(`De'Longhi device ${dsn} is ${status}; refusing to queue a cloud command`);
+    }
+  }
+
+  private async postProperty(dsn: string, prop: string, value: any): Promise<void> {
+    await this.assertDeviceOnline(dsn);
     const headers = {
       'User-Agent': API_USER_AGENT,
       'Authorization': `auth_token ${this.authToken}`,
@@ -259,6 +341,20 @@ export class DelonghiClient {
     }
     // Ayla boolean properties use 1=ON, 0=OFF.
     await this.postProperty(deviceId, setName, enabled ? 1 : 0);
+  }
+
+  async setSwingMode(deviceId: string, enabled: boolean): Promise<void> {
+    this.log?.debug(`setSwingMode ${deviceId} => ${enabled}`);
+    if (this.useMock) {
+      this.updateCache(deviceId, { swingMode: enabled });
+      return;
+    }
+    await this.postProperty(deviceId, 'set_swing_function', enabled ? 1 : 0);
+  }
+
+  private toBoolean(value: unknown): boolean | undefined {
+    if (value === undefined || value === null) return undefined;
+    return value === 1 || value === '1' || value === true;
   }
 
   private async performAuthFlow(): Promise<string> {
@@ -363,7 +459,12 @@ export class DelonghiClient {
         },
       });
       const consentText: string = String(consentPage.data);
-      const signature = consentText.split("const consentObj2Sig = '")[1].split("';")[0];
+      // The consent page uses either JavaScript quote style for this signature.
+      const signatureMatch = consentText.match(/\bconst\s+consentObj2Sig\s*=\s*(['"])(.*?)\1/);
+      if (!signatureMatch?.[2]) {
+        throw new Error('Consent page did not include a signature');
+      }
+      const signature = signatureMatch[2];
 
       // 6) authorize continue to get code
       phase = 'authorizeContinue';
@@ -410,9 +511,12 @@ export class DelonghiClient {
         app_secret: APP_SECRET,
         token: idpAccessToken,
       }), { headers: { 'User-Agent': TOKEN_USER_AGENT, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' } });
-      const refreshToken = signInResp.data?.refresh_token as string;
-      const accessToken = signInResp.data?.access_token as string;
-      this.refreshToken = refreshToken;
+      const accessToken: unknown = signInResp.data?.access_token;
+      if (typeof accessToken !== 'string' || !accessToken) {
+        throw new Error('Ayla sign-in did not return an access token');
+      }
+      const refreshToken: unknown = signInResp.data.refresh_token;
+      this.refreshToken = typeof refreshToken === 'string' && refreshToken ? refreshToken : undefined;
       return accessToken;
     } catch (err: any) {
       const msg = err?.response?.status ? `${err.response.status} ${err.response.statusText}` : (err?.message || String(err));

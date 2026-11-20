@@ -16,6 +16,8 @@ function createClientSpy() {
     setMode: [],
     setTargetTemperature: [],
     setFanSpeed: [],
+    setSilentMode: [],
+    setSwingMode: [],
   };
 
   return {
@@ -31,6 +33,12 @@ function createClientSpy() {
     },
     async setFanSpeed(deviceId, value) {
       calls.setFanSpeed.push([deviceId, value]);
+    },
+    async setSilentMode(deviceId, value) {
+      calls.setSilentMode.push([deviceId, value]);
+    },
+    async setSwingMode(deviceId, value) {
+      calls.setSwingMode.push([deviceId, value]);
     },
   };
 }
@@ -93,6 +101,33 @@ test('accessory exposes cool-mode heater/cooler state and fan speed mappings', a
   );
   assert.equal(service.getCharacteristic(Characteristic.CoolingThresholdTemperature).props.minValue, 18);
   assert.equal(service.getCharacteristic(Characteristic.CoolingThresholdTemperature).props.maxValue, 32);
+});
+
+test('accessory rolls back Active when the cloud rejects a power command', async () => {
+  const device = {
+    id: 'device-1',
+    name: 'Bedroom',
+    power: true,
+    mode: 'cool',
+    roomTemperature: 26,
+    targetTemperature: 23,
+    fanSpeed: 'medium',
+  };
+  const { api, log, client, service } = createPlatformFixture(device);
+  const { Characteristic } = api.hap;
+  client.setPower = async () => {
+    throw new Error('device is Offline');
+  };
+
+  await service.getCharacteristic(Characteristic.Active)
+    .invokeSet(Characteristic.Active.INACTIVE);
+
+  assert.equal(
+    await service.getCharacteristic(Characteristic.Active).invokeGet(),
+    Characteristic.Active.ACTIVE,
+  );
+  assert.equal(service.getCharacteristic(Characteristic.Active).value, Characteristic.Active.ACTIVE);
+  assert.match(log.entries.warn[0], /device is Offline/);
 });
 
 test('accessory switches into eco presentation and locks thresholds when AUTO is selected', async () => {
@@ -177,4 +212,44 @@ test('accessory update refreshes eco-mode values and rotation speed from cloud s
   assert.equal(service.getCharacteristic(Characteristic.CoolingThresholdTemperature).value, 24);
   assert.equal(service.getCharacteristic(Characteristic.HeatingThresholdTemperature).value, 20);
   assert.equal(service.getCharacteristic(Characteristic.RotationSpeed).value, 100);
+});
+
+test('EL110 exposes its truthful range, humidity, silent mode, and swing controls', async () => {
+  const device = {
+    id: 'device-1',
+    name: 'Air Con',
+    model: 'EL110',
+    firmwareVersion: '2.0',
+    minimumTargetTemperature: 19,
+    power: true,
+    mode: 'cool',
+    roomTemperature: 31,
+    targetTemperature: 19,
+    humidity: 43,
+    fanSpeed: 'high',
+    silentMode: false,
+    swingMode: true,
+  };
+
+  const { api, accessory, client, service } = createPlatformFixture(device);
+  const { Characteristic, Service } = api.hap;
+
+  assert.equal(service.getCharacteristic(Characteristic.CoolingThresholdTemperature).props.minValue, 19);
+  assert.equal(
+    accessory.getService(Service.AccessoryInformation).getCharacteristic(Characteristic.Model).value,
+    'EL110',
+  );
+  assert.equal(
+    await accessory.getService(Service.HumiditySensor)
+      .getCharacteristic(Characteristic.CurrentRelativeHumidity).invokeGet(),
+    43,
+  );
+
+  const silent = accessory.getServiceById(Service.Switch, 'silent-mode');
+  const swing = accessory.getServiceById(Service.Switch, 'swing-mode');
+  await silent.getCharacteristic(Characteristic.On).invokeSet(true);
+  await swing.getCharacteristic(Characteristic.On).invokeSet(false);
+
+  assert.deepEqual(client.calls.setSilentMode, [['device-1', true]]);
+  assert.deepEqual(client.calls.setSwingMode, [['device-1', false]]);
 });

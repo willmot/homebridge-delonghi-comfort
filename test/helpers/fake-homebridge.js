@@ -46,9 +46,10 @@ class FakeCharacteristicInstance {
 }
 
 class FakeServiceInstance {
-  constructor(serviceType, label) {
+  constructor(serviceType, label, subtype) {
     this.serviceType = serviceType;
     this.label = label;
+    this.subtype = subtype;
     this.characteristics = new Map();
   }
 
@@ -91,12 +92,19 @@ class FakePlatformAccessory {
   }
 
   getService(definition) {
-    return this.services.get(definition);
+    if (typeof definition === 'string') {
+      return [...this.services.values()].find(service => service.label === definition);
+    }
+    return [...this.services.values()].find(service => service.serviceType === definition);
   }
 
-  addService(definition) {
-    const service = new FakeServiceInstance(definition, definition.name || 'Service');
-    this.services.set(definition, service);
+  getServiceById(definition, subtype) {
+    return [...this.services.values()].find(service => service.serviceType === definition && service.subtype === subtype);
+  }
+
+  addService(definition, label, subtype) {
+    const service = new FakeServiceInstance(definition, label || definition.name || 'Service', subtype);
+    this.services.set(`${definition.name}:${subtype || ''}`, service);
     return service;
   }
 }
@@ -114,6 +122,7 @@ function createFakeHAP() {
     },
     Manufacturer: createCharacteristic('Manufacturer'),
     Model: createCharacteristic('Model'),
+    FirmwareRevision: createCharacteristic('FirmwareRevision'),
     SerialNumber: createCharacteristic('SerialNumber'),
     Name: createCharacteristic('Name'),
     Active: createCharacteristic('Active', {
@@ -135,6 +144,8 @@ function createFakeHAP() {
     CoolingThresholdTemperature: createCharacteristic('CoolingThresholdTemperature'),
     HeatingThresholdTemperature: createCharacteristic('HeatingThresholdTemperature'),
     RotationSpeed: createCharacteristic('RotationSpeed'),
+    CurrentRelativeHumidity: createCharacteristic('CurrentRelativeHumidity'),
+    On: createCharacteristic('On'),
     TemperatureDisplayUnits: createCharacteristic('TemperatureDisplayUnits', {
       CELSIUS: 0,
       FAHRENHEIT: 1,
@@ -144,6 +155,8 @@ function createFakeHAP() {
   const Service = {
     AccessoryInformation: { name: 'AccessoryInformation' },
     HeaterCooler: { name: 'HeaterCooler' },
+    HumiditySensor: { name: 'HumiditySensor' },
+    Switch: { name: 'Switch' },
   };
 
   return { Characteristic, Service };

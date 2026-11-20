@@ -34,9 +34,10 @@ npm i -g homebridge-delonghi-comfort
 ### Behavior
 
 - Cooling-only Heater/Cooler mapping implemented (no heat mode for PAC models).
-- Full cloud auth flow (Gigya/Ayla) implemented based on the HA integration.
+- Uses your De'Longhi Comfort account and the Ayla cloud. The plugin renews the session automatically when a polling request is unauthorized.
 - Polling with accessory updates and device removal handling.
 - Target state: AUTO switches device to Eco Real Feel mode; COOL switches to standard cooling.
+- The PAC EL110 exposes humidity, Silent Mode, and Swing in Home when those properties are available. Its minimum cooling setpoint is 19 °C.
 - Doesn't support Dehumidify Only or Fan Only modes.
 
 ### Credits
